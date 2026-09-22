@@ -1,0 +1,10 @@
+node_modules
+dist
+.env.local
+.env.*.local
+
+# Dados financeiros reais — não vão pro repositório
+relatorio wise/
+*.csv
+supabase/import_cambios_pagina16.sql
+supabase/dedupe_cambios.sql
