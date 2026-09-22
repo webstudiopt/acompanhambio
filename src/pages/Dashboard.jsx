@@ -2,21 +2,24 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
 import ProgressBar from '../components/ProgressBar'
 import AllocateForm from '../components/AllocateForm'
+import FlagBadge from '../components/FlagBadge'
 
 export default function Dashboard() {
   const [categorias, setCategorias] = useState([])
   const [cambios, setCambios] = useState([])
   const [alocacoes, setAlocacoes] = useState([])
+  const [dataMeta, setDataMeta] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [info, setInfo] = useState(null)
   const [ultimaDistribuicao, setUltimaDistribuicao] = useState(null)
 
   async function load() {
-    const [categoriasRes, cambiosRes, alocacoesRes] = await Promise.all([
+    const [categoriasRes, cambiosRes, alocacoesRes, configRes] = await Promise.all([
       supabase.from('categorias').select('*'),
       supabase.from('cambios').select('*'),
       supabase.from('cambio_alocacoes').select('*'),
+      supabase.from('config').select('data_meta').maybeSingle(),
     ])
     if (categoriasRes.error) setError(categoriasRes.error.message)
     else setCategorias(categoriasRes.data)
@@ -24,6 +27,7 @@ export default function Dashboard() {
     else setCambios(cambiosRes.data)
     if (alocacoesRes.error) setError(alocacoesRes.error.message)
     else setAlocacoes(alocacoesRes.data)
+    if (!configRes.error) setDataMeta(configRes.data?.data_meta ?? '')
     setLoading(false)
   }
 
@@ -37,6 +41,10 @@ export default function Dashboard() {
   const totalEuros = cambios.reduce((sum, c) => sum + Number(c.valor_euros), 0)
   const metaTotal = categorias.reduce((sum, c) => sum + Number(c.valor_meta), 0)
   const totalAlocado = alocacoes.reduce((sum, a) => sum + Number(a.valor_euros), 0)
+
+  const diasParaViagem = dataMeta
+    ? Math.ceil((new Date(`${dataMeta}T00:00:00`) - new Date(new Date().toDateString())) / 86400000)
+    : null
 
   const porCategoria = categorias
     .map((cat) => {
@@ -349,6 +357,22 @@ export default function Dashboard() {
   return (
     <div className="page">
       <h1>Dashboard</h1>
+
+      {diasParaViagem != null && (
+        <div className="trip-countdown">
+          <FlagBadge size={32} />
+          <div className="trip-countdown-text">
+            <span className="trip-countdown-label">Contagem regressiva</span>
+            <span className="trip-countdown-value">
+              {diasParaViagem > 0
+                ? `${diasParaViagem} dia${diasParaViagem === 1 ? '' : 's'} até a viagem`
+                : diasParaViagem === 0
+                  ? 'É hoje!'
+                  : 'Data da meta já passou'}
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="dashboard-summary">
         <div className="summary-card">

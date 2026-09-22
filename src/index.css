@@ -1,13 +1,17 @@
+/* Paleta inspirada na bandeira da Irlanda (verde / branco / laranja) */
 :root {
   --color-bg: #f7f7f5;
   --color-surface: #ffffff;
   --color-border: #e0e0dc;
   --color-text: #1f1f1f;
   --color-muted: #6b6b6b;
-  --color-primary: #2f6f4f;
-  --color-primary-dark: #24593f;
-  --color-accent: #c9822f;
-  --color-danger: #b3401f;
+  --color-primary: #159b62;
+  --color-primary-dark: #0f7a4c;
+  --color-accent: #ff8c42;
+  --color-danger: #c94f32;
+  --flag-green: #169b62;
+  --flag-white: #ffffff;
+  --flag-orange: #ff883e;
   color-scheme: light;
 }
 
@@ -18,10 +22,10 @@
     --color-border: #2d3138;
     --color-text: #eaeaea;
     --color-muted: #9a9a97;
-    --color-primary: #4f9c73;
-    --color-primary-dark: #63b487;
-    --color-accent: #dd9e56;
-    --color-danger: #d97a5c;
+    --color-primary: #2fbb80;
+    --color-primary-dark: #159b62;
+    --color-accent: #ffa05f;
+    --color-danger: #db7256;
     color-scheme: dark;
   }
 }
@@ -32,10 +36,10 @@
   --color-border: #2d3138;
   --color-text: #eaeaea;
   --color-muted: #9a9a97;
-  --color-primary: #4f9c73;
-  --color-primary-dark: #63b487;
-  --color-accent: #dd9e56;
-  --color-danger: #d97a5c;
+  --color-primary: #2fbb80;
+  --color-primary-dark: #159b62;
+  --color-accent: #ffa05f;
+  --color-danger: #db7256;
   color-scheme: dark;
 }
 
@@ -326,6 +330,57 @@ button.danger {
 .progress-bar-fill {
   height: 100%;
   background: var(--color-primary);
+}
+
+/* bandeira */
+
+.flag-badge {
+  display: inline-flex;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border);
+}
+
+.flag-stripe {
+  flex: 1;
+}
+
+.flag-stripe.flag-green {
+  background: var(--flag-green);
+}
+
+.flag-stripe.flag-white {
+  background: var(--flag-white);
+}
+
+.flag-stripe.flag-orange {
+  background: var(--flag-orange);
+}
+
+.trip-countdown {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+
+.trip-countdown-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.trip-countdown-label {
+  font-size: 0.8rem;
+  color: var(--color-muted);
+}
+
+.trip-countdown-value {
+  font-size: 1.1rem;
+  font-weight: 600;
 }
 
 /* dashboard */
