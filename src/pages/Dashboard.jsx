@@ -40,6 +40,7 @@ export default function Dashboard() {
 
   const totalEuros = cambios.reduce((sum, c) => sum + Number(c.valor_euros), 0)
   const metaTotal = categorias.reduce((sum, c) => sum + Number(c.valor_meta), 0)
+  const faltaParaMeta = metaTotal - totalEuros
   const totalAlocado = alocacoes.reduce((sum, a) => sum + Number(a.valor_euros), 0)
 
   const diasParaViagem = dataMeta
@@ -387,6 +388,13 @@ export default function Dashboard() {
         <div className="summary-card">
           <span className="summary-label">Meta total</span>
           <span className="summary-value">€{metaTotal.toFixed(2)}</span>
+        </div>
+        <div className="summary-card">
+          <span className="summary-label">Falta para a meta</span>
+          <span className="summary-value">€{Math.max(0, faltaParaMeta).toFixed(2)}</span>
+          {faltaParaMeta < -0.004 && (
+            <span className="summary-sub">Meta superada em €{Math.abs(faltaParaMeta).toFixed(2)}</span>
+          )}
         </div>
         <div className="summary-card">
           <span className="summary-label">Câmbio médio</span>
