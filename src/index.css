@@ -591,8 +591,21 @@ button.danger {
 
 .outlier-form {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.3rem;
   align-items: center;
+}
+
+.outlier-form input.outlier-nota {
+  width: 220px;
+}
+
+.mes-nota {
+  display: block;
+  color: var(--color-muted);
+  font-size: 0.8rem;
+  font-style: italic;
 }
 
 .outlier-form input {

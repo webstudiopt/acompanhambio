@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabaseClient'
+import { chaveMes, planoMensal, resumoMetas } from '../lib/metas'
 
 const MESES = [
   'Janeiro',
@@ -17,38 +18,40 @@ const MESES = [
   'Dezembro',
 ]
 
-function chaveMes(ano, mes) {
-  return `${ano}-${String(mes + 1).padStart(2, '0')}`
-}
-
 export default function Estimativa() {
   const navigate = useNavigate()
   const [dataMeta, setDataMeta] = useState('')
   const [editandoMeta, setEditandoMeta] = useState(false)
   const [outliers, setOutliers] = useState({})
+  const [notas, setNotas] = useState({})
   const [editandoOutlier, setEditandoOutlier] = useState(null)
   const [mostrarAnteriores, setMostrarAnteriores] = useState(false)
   const [categorias, setCategorias] = useState([])
   const [cambios, setCambios] = useState([])
+  const [alocacoes, setAlocacoes] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   async function load() {
     setLoading(true)
-    const [configRes, categoriasRes, cambiosRes] = await Promise.all([
-      supabase.from('config').select('data_meta, outliers').maybeSingle(),
-      supabase.from('categorias').select('valor_meta'),
+    const [configRes, categoriasRes, cambiosRes, alocacoesRes] = await Promise.all([
+      supabase.from('config').select('*').maybeSingle(),
+      supabase.from('categorias').select('*'),
       supabase.from('cambios').select('data, valor_reais, valor_euros, taxa_efetiva'),
+      supabase.from('cambio_alocacoes').select('categoria_id, valor_euros'),
     ])
     if (configRes.error) setError(configRes.error.message)
     else {
       setDataMeta(configRes.data?.data_meta ?? '')
       setOutliers(configRes.data?.outliers ?? {})
+      setNotas(configRes.data?.notas_meses ?? {})
     }
     if (categoriasRes.error) setError(categoriasRes.error.message)
     else setCategorias(categoriasRes.data)
     if (cambiosRes.error) setError(cambiosRes.error.message)
     else setCambios(cambiosRes.data)
+    if (alocacoesRes.error) setError(alocacoesRes.error.message)
+    else setAlocacoes(alocacoesRes.data)
     setLoading(false)
     setEditandoMeta(!configRes.data?.data_meta)
   }
@@ -77,21 +80,28 @@ export default function Estimativa() {
     }
   }
 
-  async function salvarOutlier(chave, valor) {
-    const novo = { ...outliers }
-    if (valor == null) delete novo[chave]
-    else novo[chave] = valor
-    if (await salvarConfig({ outliers: novo })) {
-      setOutliers(novo)
+  // Salva o valor customizado e a descrição do mês (ex: "venda do carro").
+  // Campo vazio remove. Só manda as notas se mudaram.
+  async function salvarMes(chave, valor, nota) {
+    const novosOutliers = { ...outliers }
+    if (valor == null) delete novosOutliers[chave]
+    else novosOutliers[chave] = valor
+    const novasNotas = { ...notas }
+    if (nota) novasNotas[chave] = nota
+    else delete novasNotas[chave]
+    const campos = { outliers: novosOutliers }
+    if ((notas[chave] ?? '') !== (nota ?? '')) campos.notas_meses = novasNotas
+    if (await salvarConfig(campos)) {
+      setOutliers(novosOutliers)
+      setNotas(novasNotas)
       setEditandoOutlier(null)
     }
   }
 
   if (loading) return <div className="page">Carregando...</div>
 
-  const totalEuros = cambios.reduce((sum, c) => sum + Number(c.valor_euros), 0)
-  const metaTotal = categorias.reduce((sum, c) => sum + Number(c.valor_meta), 0)
-  const falta = Math.max(0, metaTotal - totalEuros)
+  const resumo = resumoMetas(categorias, cambios, alocacoes)
+  const falta = Math.max(0, resumo.falta)
   // Média simples: soma da taxa_efetiva de cada lançamento dividida pela
   // quantidade de lançamentos com taxa calculada.
   const taxasValidas = cambios.filter((c) => c.taxa_efetiva != null).map((c) => Number(c.taxa_efetiva))
@@ -101,32 +111,14 @@ export default function Estimativa() {
   const anoAtual = hoje.getFullYear()
   const mesAtual = hoje.getMonth()
 
-  let meses = []
-  let mesesRestantes = 0
+  const { meses, mesesRestantes, cambiosPorMes, valorPorMes, semCobertura, somaOutliers, mesesComOutlier } =
+    planoMensal({ falta, cambios, outliers, dataMeta, hoje })
 
-  if (dataMeta) {
-    const [anoMeta, mesMetaStr] = dataMeta.split('-')
-    const anoMetaNum = Number(anoMeta)
-    const mesMetaNum = Number(mesMetaStr) - 1
-
-    mesesRestantes = (anoMetaNum - anoAtual) * 12 + (mesMetaNum - mesAtual) + 1
-
-    if (mesesRestantes > 0 && mesesRestantes <= 240) {
-      for (let i = 0; i < mesesRestantes; i++) {
-        const totalMes = mesAtual + i
-        const ano = anoAtual + Math.floor(totalMes / 12)
-        const mes = totalMes % 12
-        meses.push({ ano, mes, chave: chaveMes(ano, mes) })
-      }
-    }
-  }
-
-  const cambiosPorMes = {}
   const reaisPorMes = {}
   cambios.forEach((c) => {
+    if (c.valor_reais == null) return
     const chave = c.data.slice(0, 7)
-    cambiosPorMes[chave] = (cambiosPorMes[chave] || 0) + Number(c.valor_euros)
-    if (c.valor_reais != null) reaisPorMes[chave] = (reaisPorMes[chave] || 0) + Number(c.valor_reais)
+    reaisPorMes[chave] = (reaisPorMes[chave] || 0) + Number(c.valor_reais)
   })
 
   // Meses anteriores ao atual (histórico), só pra visualização — não entram
@@ -148,23 +140,32 @@ export default function Estimativa() {
     }
   }
 
-  // Meses já lançados (câmbio real feito) ou com valor customizado ("outlier")
-  // saem da divisão igualitária. "falta" já desconta tudo que foi realmente
-  // juntado (inclusive nos meses já lançados), então só precisamos tirar do
-  // total pendente os outliers futuros ainda não lançados — por isso o plano
-  // se recalcula sozinho conforme você loga os câmbios reais mês a mês.
-  const mesesComValorFixo = meses.filter((m) => (cambiosPorMes[m.chave] ?? 0) > 0 || outliers[m.chave] != null)
-  const mesesPendentes = meses.length - mesesComValorFixo.length
-  const somaOutliersFuturos = meses.reduce((sum, m) => {
-    const jaFeito = (cambiosPorMes[m.chave] ?? 0) > 0
-    if (!jaFeito && outliers[m.chave] != null) return sum + Number(outliers[m.chave])
-    return sum
-  }, 0)
-  const outliersNoRange = Object.entries(outliers).filter(([chave]) => meses.some((m) => m.chave === chave))
-  const somaOutliers = outliersNoRange.reduce((sum, [, v]) => sum + Number(v), 0)
-  const mesesComOutlier = outliersNoRange.length
-  const faltaRestante = Math.max(0, falta - somaOutliersFuturos)
-  const valorPorMes = mesesPendentes > 0 ? faltaRestante / mesesPendentes : 0
+  // "Recalcular": apaga os valores customizados dos meses ainda não lançados,
+  // pra que o que falta seja dividido igualmente entre eles. Meses já lançados
+  // e meses com descrição (entrada planejada, ex: venda do carro) ficam.
+  const mesesNaoLancados = meses.filter((m) => !((cambiosPorMes[m.chave] ?? 0) > 0))
+  const mesesPlanejados = mesesNaoLancados.filter((m) => outliers[m.chave] != null && notas[m.chave])
+  const outliersPendentes = mesesNaoLancados.filter((m) => outliers[m.chave] != null && !notas[m.chave])
+  const somaPlanejados = mesesPlanejados.reduce((sum, m) => sum + Number(outliers[m.chave]), 0)
+  const mesesParaDividir = mesesNaoLancados.length - mesesPlanejados.length
+  const valorRecalculado = mesesParaDividir > 0 ? Math.max(0, falta - somaPlanejados) / mesesParaDividir : 0
+
+  async function recalcularEstimativa() {
+    const mantidos =
+      mesesPlanejados.length > 0
+        ? ` Mantém ${mesesPlanejados.map((m) => `${MESES[m.mes]}/${m.ano} (${notas[m.chave]})`).join(', ')}.`
+        : ''
+    if (
+      !window.confirm(
+        `Apagar o valor customizado de ${outliersPendentes.length} mês(es) ainda não lançado(s) e dividir o que falta igualmente: €${valorRecalculado.toFixed(2)} por mês?${mantidos}`
+      )
+    ) {
+      return
+    }
+    const novo = { ...outliers }
+    outliersPendentes.forEach((m) => delete novo[m.chave])
+    if (await salvarConfig({ outliers: novo })) setOutliers(novo)
+  }
 
   function irParaCambio(ano, mes, chave, jaFeito) {
     if (jaFeito) {
@@ -188,6 +189,9 @@ export default function Estimativa() {
         <div className="summary-card">
           <span className="summary-label">Falta juntar</span>
           <span className="summary-value">€{falta.toFixed(2)}</span>
+          {resumo.aReceber > 0.004 && (
+            <span className="summary-sub">já descontando €{resumo.aReceber.toFixed(2)} a receber</span>
+          )}
         </div>
         <div className="summary-card">
           <span className="summary-label">Meses restantes</span>
@@ -205,18 +209,38 @@ export default function Estimativa() {
       {meses.length > 0 && taxaMedia != null && (
         <p className="empty-state">Baseado no câmbio médio até agora (~{taxaMedia.toFixed(4)}).</p>
       )}
+      {semCobertura > 0.004 && (
+        <p className="error-text">
+          Com os valores customizados ainda ficam faltando €{semCobertura.toFixed(2)} — aumente algum mês do plano ou
+          recalcule.
+        </p>
+      )}
       {mesesComOutlier > 0 && (
         <p className="empty-state">
           {mesesComOutlier} mês(es) com valor customizado (€{somaOutliers.toFixed(2)} no total) — a sugestão acima já
           foi recalculada só com os demais meses.
         </p>
       )}
+      {outliersPendentes.length > 0 && (
+        <button type="button" className="secondary" onClick={recalcularEstimativa}>
+          Recalcular estimativa (€{valorRecalculado.toFixed(2)}/mês nos {mesesParaDividir} meses faltantes)
+        </button>
+      )}
 
       <div className="form">
         {!editandoMeta ? (
           <div className="categoria-row">
             <span>
-              Meta: <strong>{MESES[Number(dataMeta.split('-')[1]) - 1]} de {dataMeta.split('-')[0]}</strong>
+              Viagem: <strong>{MESES[Number(dataMeta.split('-')[1]) - 1]} de {dataMeta.split('-')[0]}</strong>
+              {meses.length > 0 && (
+                <>
+                  {' '}
+                  · dinheiro completo até{' '}
+                  <strong>
+                    {MESES[meses[meses.length - 1].mes]} de {meses[meses.length - 1].ano}
+                  </strong>
+                </>
+              )}
             </span>
             <button type="button" className="secondary" onClick={() => setEditandoMeta(true)}>
               Alterar
@@ -231,7 +255,7 @@ export default function Estimativa() {
             }}
           >
             <label>
-              Mês/ano da meta final
+              Mês/ano da viagem
               <input name="mes" type="month" defaultValue={dataMeta ? dataMeta.slice(0, 7) : ''} required />
             </label>
             <div className="form-actions">
@@ -309,6 +333,7 @@ export default function Estimativa() {
                       <span>
                         {MESES[mes]} de {ano}
                         {jaFeito && ` — já lançado (€${cambiosPorMes[chave].toFixed(2)})`}
+                        {notas[chave] && editandoOutlier !== chave && <span className="mes-nota">{notas[chave]}</span>}
                       </span>
                     </label>
 
@@ -318,7 +343,7 @@ export default function Estimativa() {
                         onSubmit={(e) => {
                           e.preventDefault()
                           const v = e.target.valor.value
-                          salvarOutlier(chave, v === '' ? null : Number(v))
+                          salvarMes(chave, v === '' ? null : Number(v), e.target.nota.value.trim())
                         }}
                       >
                         <input
@@ -328,6 +353,13 @@ export default function Estimativa() {
                           autoFocus
                           defaultValue={outlier ?? ''}
                           placeholder="€ nesse mês"
+                        />
+                        <input
+                          name="nota"
+                          className="outlier-nota"
+                          maxLength={80}
+                          defaultValue={notas[chave] ?? ''}
+                          placeholder="de onde vem? (ex: venda do carro)"
                         />
                         <button type="submit">OK</button>
                         <button type="button" className="secondary" onClick={() => setEditandoOutlier(null)}>

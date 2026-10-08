@@ -6,6 +6,8 @@ create table categorias (
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
   nome text not null,
   valor_meta numeric(12,2) not null default 0,
+  -- Dinheiro que vai entrar sem ser juntado (ex: empréstimo voltando).
+  a_receber boolean not null default false,
   criado_em timestamptz not null default now()
 );
 
@@ -40,6 +42,8 @@ create table config (
   data_meta date,
   -- Valores customizados por mês na tela de Estimativa, ex: { "2027-12": 5000 }.
   outliers jsonb not null default '{}'::jsonb,
+  -- Descrição por mês na Estimativa, ex: { "2027-10": "venda do carro" }.
+  notas_meses jsonb not null default '{}'::jsonb,
   criado_em timestamptz not null default now()
 );
 

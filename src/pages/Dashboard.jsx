@@ -3,12 +3,16 @@ import { supabase } from '../lib/supabaseClient'
 import ProgressBar from '../components/ProgressBar'
 import AllocateForm from '../components/AllocateForm'
 import FlagBadge from '../components/FlagBadge'
+import { planoMensal, resumoMetas, tipoDaCategoria } from '../lib/metas'
+
+const MESES_CURTOS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez']
 
 export default function Dashboard() {
   const [categorias, setCategorias] = useState([])
   const [cambios, setCambios] = useState([])
   const [alocacoes, setAlocacoes] = useState([])
   const [dataMeta, setDataMeta] = useState('')
+  const [outliers, setOutliers] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [info, setInfo] = useState(null)
@@ -19,7 +23,7 @@ export default function Dashboard() {
       supabase.from('categorias').select('*'),
       supabase.from('cambios').select('*'),
       supabase.from('cambio_alocacoes').select('*'),
-      supabase.from('config').select('data_meta').maybeSingle(),
+      supabase.from('config').select('data_meta, outliers').maybeSingle(),
     ])
     if (categoriasRes.error) setError(categoriasRes.error.message)
     else setCategorias(categoriasRes.data)
@@ -27,7 +31,10 @@ export default function Dashboard() {
     else setCambios(cambiosRes.data)
     if (alocacoesRes.error) setError(alocacoesRes.error.message)
     else setAlocacoes(alocacoesRes.data)
-    if (!configRes.error) setDataMeta(configRes.data?.data_meta ?? '')
+    if (!configRes.error) {
+      setDataMeta(configRes.data?.data_meta ?? '')
+      setOutliers(configRes.data?.outliers ?? {})
+    }
     setLoading(false)
   }
 
@@ -38,9 +45,15 @@ export default function Dashboard() {
   if (loading) return <div className="page">Carregando...</div>
   if (error && cambios.length === 0) return <div className="page error-text">{error}</div>
 
-  const totalEuros = cambios.reduce((sum, c) => sum + Number(c.valor_euros), 0)
-  const metaTotal = categorias.reduce((sum, c) => sum + Number(c.valor_meta), 0)
-  const faltaParaMeta = metaTotal - totalEuros
+  const resumo = resumoMetas(categorias, cambios, alocacoes)
+  const totalEuros = resumo.saldo
+  const faltaParaMeta = resumo.falta
+  const plano = planoMensal({ falta: Math.max(0, faltaParaMeta), cambios, outliers, dataMeta })
+  const ultimoMesPlano = plano.meses[plano.meses.length - 1]
+  // Média simples pro card: o que falta dividido pelos meses ainda sem câmbio
+  // lançado (o plano com valores customizados fica na Estimativa).
+  const mesesSemLancamento = plano.meses.filter((m) => !((plano.cambiosPorMes[m.chave] ?? 0) > 0)).length
+  const porMes = mesesSemLancamento > 0 ? Math.max(0, faltaParaMeta) / mesesSemLancamento : null
   const totalAlocado = alocacoes.reduce((sum, a) => sum + Number(a.valor_euros), 0)
 
   const diasParaViagem = dataMeta
@@ -259,7 +272,9 @@ export default function Dashboard() {
     setError(null)
     setInfo(null)
 
+    // Só economias recebem depósito; "a receber" se completa quando o dinheiro volta.
     const prioridades = categorias
+      .filter((cat) => tipoDaCategoria(cat) === 'economia')
       .map((cat) => {
         const acumulado = alocacoes
           .filter((a) => a.categoria_id === cat.id)
@@ -386,23 +401,51 @@ export default function Dashboard() {
           )}
         </div>
         <div className="summary-card">
-          <span className="summary-label">Meta total</span>
-          <span className="summary-value">€{metaTotal.toFixed(2)}</span>
+          <span className="summary-label">Precisa ter até a viagem</span>
+          <span className="summary-value">€{resumo.precisaTer.toFixed(2)}</span>
+          {resumo.despesasAPagar > 0.004 && (
+            <span className="summary-sub">
+              €{resumo.economia.toFixed(2)} guardado + €{resumo.despesasAPagar.toFixed(2)} ainda a pagar
+            </span>
+          )}
         </div>
+        {resumo.aReceber > 0.004 && (
+          <div className="summary-card">
+            <span className="summary-label">A receber</span>
+            <span className="summary-value">€{resumo.aReceber.toFixed(2)}</span>
+            <span className="summary-sub">ainda não está na conta</span>
+          </div>
+        )}
         <div className="summary-card">
-          <span className="summary-label">Falta para a meta</span>
+          <span className="summary-label">Falta juntar</span>
           <span className="summary-value">€{Math.max(0, faltaParaMeta).toFixed(2)}</span>
           {faltaParaMeta < -0.004 && (
             <span className="summary-sub">Meta superada em €{Math.abs(faltaParaMeta).toFixed(2)}</span>
           )}
         </div>
+        {porMes != null && (
+          <div className="summary-card">
+            <span className="summary-label">Por mês</span>
+            <span className="summary-value">€{porMes.toFixed(2)}</span>
+            <span className="summary-sub">
+              {mesesSemLancamento} {mesesSemLancamento === 1 ? 'mês' : 'meses'}, até {MESES_CURTOS[ultimoMesPlano.mes]}/
+              {ultimoMesPlano.ano}
+              {taxaMedia != null && ` · ≈R$${(porMes * taxaMedia).toFixed(2)}`}
+            </span>
+          </div>
+        )}
         <div className="summary-card">
           <span className="summary-label">Câmbio médio</span>
           <span className="summary-value">{taxaMedia != null ? taxaMedia.toFixed(4) : '—'}</span>
         </div>
       </div>
 
-      <ProgressBar label="Progresso geral" current={totalEuros} target={metaTotal} />
+      {/* Alvo = o que precisa sair do seu bolso (sem contar o que está a receber). */}
+      <ProgressBar
+        label="Progresso geral"
+        current={totalEuros}
+        target={Math.max(totalEuros, resumo.precisaTer - resumo.aReceber)}
+      />
 
       <div className="alloc-overview">
         <div className="alloc-overview-title-row">
